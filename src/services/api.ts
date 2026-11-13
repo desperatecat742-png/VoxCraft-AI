@@ -21,6 +21,15 @@ async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
     ...options,
   });
 
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    throw new Error(
+      res.status === 404
+        ? `API endpoint not found (${url}). Verify Vercel serverless routes (/api/*) are deployed.`
+        : `Server returned unexpected response (${res.status}) for ${url}.`
+    );
+  }
+
   const data = (await res.json().catch(() => ({}))) as T & { error?: string };
   if (!res.ok) {
     throw new Error(data.error || `Request failed with status ${res.status}`);

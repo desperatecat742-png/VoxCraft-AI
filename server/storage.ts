@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import type {
@@ -45,13 +46,31 @@ interface PersistedDatabase {
   proWaitlistEmails?: string[];
 }
 
-const DATA_DIR = path.resolve(process.cwd(), 'server', 'data');
+const IS_SERVERLESS = Boolean(
+  process.env.VERCEL ||
+    process.env.VERCEL_ENV ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME ||
+    process.env.NETLIFY
+);
+
+const DATA_DIR = process.env.VOXCRAFT_DATA_DIR
+  ? path.resolve(process.env.VOXCRAFT_DATA_DIR)
+  : IS_SERVERLESS
+    ? path.join(os.tmpdir(), 'voxcraft-data')
+    : path.resolve(process.cwd(), 'server', 'data');
+
 const STORE_PATH = path.join(DATA_DIR, 'store.json');
 const PREVIEW_CACHE_DIR = path.join(DATA_DIR, 'voice_previews');
+const memoryPreviewCache = new Map<string, string>();
 
-function ensureDirs(): void {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.mkdirSync(PREVIEW_CACHE_DIR, { recursive: true });
+function ensureDirs(): boolean {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.mkdirSync(PREVIEW_CACHE_DIR, { recursive: true });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function getTodayKey(): string {
@@ -72,7 +91,7 @@ function loadDb(): PersistedDatabase {
       };
     }
   } catch {
-    // Fallback to clean store if corrupted
+    // Fallback to clean in-memory store if unreadable
   }
   return {
     users: {},
@@ -85,10 +104,14 @@ function loadDb(): PersistedDatabase {
 let db: PersistedDatabase = loadDb();
 
 function saveDb(): void {
-  ensureDirs();
-  const tmpPath = `${STORE_PATH}.tmp`;
-  fs.writeFileSync(tmpPath, JSON.stringify(db, null, 2), 'utf8');
-  fs.renameSync(tmpPath, STORE_PATH);
+  if (!ensureDirs()) return;
+  try {
+    const tmpPath = `${STORE_PATH}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(db, null, 2), 'utf8');
+    fs.renameSync(tmpPath, STORE_PATH);
+  } catch {
+    // Keep operating cleanly in-memory if filesystem write is unavailable
+  }
 }
 
 export function getOrCreateUserRecord(userId: string): UserAccountRecord {
@@ -416,20 +439,33 @@ export function deletePreset(userId: string, presetId: string): VoicePreset[] {
   return user.presets;
 }
 
-// Voice preview cache on disk (so repeated voice sample clicks return real Gemini TTS audio instantly)
+// Voice preview cache on disk/memory (so repeated voice sample clicks return real Gemini TTS audio instantly)
 export function getCachedVoicePreview(cacheKey: string): string | null {
-  ensureDirs();
-  const safeName = cacheKey.replace(/[^a-zA-Z0-9_-]/g, '_');
-  const filePath = path.join(PREVIEW_CACHE_DIR, `${safeName}.wav`);
-  if (fs.existsSync(filePath)) {
-    return fs.readFileSync(filePath).toString('base64');
+  const mem = memoryPreviewCache.get(cacheKey);
+  if (mem) return mem;
+  if (!ensureDirs()) return null;
+  try {
+    const safeName = cacheKey.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const filePath = path.join(PREVIEW_CACHE_DIR, `${safeName}.wav`);
+    if (fs.existsSync(filePath)) {
+      const b64 = fs.readFileSync(filePath).toString('base64');
+      memoryPreviewCache.set(cacheKey, b64);
+      return b64;
+    }
+  } catch {
+    // Ignore disk read error
   }
   return null;
 }
 
 export function saveCachedVoicePreview(cacheKey: string, wavBase64: string): void {
-  ensureDirs();
-  const safeName = cacheKey.replace(/[^a-zA-Z0-9_-]/g, '_');
-  const filePath = path.join(PREVIEW_CACHE_DIR, `${safeName}.wav`);
-  fs.writeFileSync(filePath, Buffer.from(wavBase64, 'base64'));
+  memoryPreviewCache.set(cacheKey, wavBase64);
+  if (!ensureDirs()) return;
+  try {
+    const safeName = cacheKey.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const filePath = path.join(PREVIEW_CACHE_DIR, `${safeName}.wav`);
+    fs.writeFileSync(filePath, Buffer.from(wavBase64, 'base64'));
+  } catch {
+    // Keep cached in memory even if filesystem write fails
+  }
 }

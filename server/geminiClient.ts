@@ -11,7 +11,9 @@ import type { AudioFormat, PronunciationTip, ScriptOutput, TtsModelId } from '..
 function getAiClient(apiVersion: 'v1' | 'v1beta' | 'v1alpha' = 'v1beta'): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    throw new Error('GEMINI_API_KEY is not configured in server environment secrets.');
+    throw new Error(
+      'GEMINI_API_KEY is not configured in server environment variables (set it in Vercel Project Settings > Environment Variables or AI Studio Secrets).'
+    );
   }
   return new GoogleGenAI({
     apiKey,

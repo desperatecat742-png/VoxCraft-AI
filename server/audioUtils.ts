@@ -1,5 +1,7 @@
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 
 const require = createRequire(import.meta.url);
@@ -11,8 +13,30 @@ interface LamejsModule {
   };
 }
 
-function loadLamejs(): LamejsModule {
-  const lameAllPath = require.resolve('lamejs/lame.all.js');
+let cachedLamejs: LamejsModule | null = null;
+
+function resolveLameAllPath(): string {
+  try {
+    return require.resolve('lamejs/lame.all.js');
+  } catch {
+    const currentDir = path.dirname(fileURLToPath(import.meta.url));
+    const candidates = [
+      path.resolve(process.cwd(), 'node_modules/lamejs/lame.all.js'),
+      path.resolve(currentDir, '../node_modules/lamejs/lame.all.js'),
+      path.resolve(currentDir, '../../node_modules/lamejs/lame.all.js'),
+    ];
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+    }
+    throw new Error('Could not locate lamejs/lame.all.js for MP3 encoding.');
+  }
+}
+
+function getLamejs(): LamejsModule {
+  if (cachedLamejs) return cachedLamejs;
+  const lameAllPath = resolveLameAllPath();
   const code = fs.readFileSync(lameAllPath, 'utf8');
   const context: Record<string, unknown> = {
     Int8Array,
@@ -26,10 +50,9 @@ function loadLamejs(): LamejsModule {
     console,
   };
   vm.runInNewContext(code, context);
-  return context.lamejs as LamejsModule;
+  cachedLamejs = context.lamejs as LamejsModule;
+  return cachedLamejs;
 }
-
-const lamejs = loadLamejs();
 
 export interface WavMetadata {
   sampleRate: number;
@@ -181,7 +204,8 @@ export function encodeWavToMp3(wavBuffer: Buffer, kbps = 128): Buffer {
     throw new Error('Cannot encode empty audio data to MP3.');
   }
 
-  const encoder = new lamejs.Mp3Encoder(meta.numChannels, meta.sampleRate, kbps);
+  const lame = getLamejs();
+  const encoder = new lame.Mp3Encoder(meta.numChannels, meta.sampleRate, kbps);
   const mp3Chunks: Buffer[] = [];
   const blockSize = 1152;
 
