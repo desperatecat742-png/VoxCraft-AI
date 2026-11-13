@@ -1,0 +1,8 @@
+{
+  "name": "VoxCraft AI",
+  "description": "International AI-powered voice production platform for text-to-speech, voiceovers, business adverts, translation, audiobooks, conversations, and multi-clip audio editing.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

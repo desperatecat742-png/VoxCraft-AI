@@ -1,0 +1,2 @@
+# VoxCraft AI - Google AdSense ads.txt
+google.com, pub-1059513612077779, DIRECT, f08c47fec0942fa0
